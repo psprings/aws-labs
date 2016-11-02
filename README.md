@@ -5,8 +5,7 @@ This tool is for use with **AWS Training Labs**. If you want to run through labs
 ---
 For full sync features:
 * [Atom](https://atom.io/) as text editor/sync tool
-
-  * Plugin: [remote-sync](https://atom.io/packages/remote-sync)
+ * Plugin: [remote-sync](https://atom.io/packages/remote-sync)
 ---
 
 Open up the labs that you are registered for via https://aws.qwiklab.com
