@@ -66,7 +66,7 @@ class Setup < Thor
       File.delete(lab_key_name) if File.exist?(lab_key_name)
       File.open(latest_downloaded_key, 'rb') do |input|
       File.open(lab_key_name, 'wb') do |output|
-          while buff == input.read(4096)
+          while buff = input.read(4096)
             output.write(buff)
           end
         end
