@@ -4,6 +4,7 @@ require 'Date'
 require 'aws-sdk-core'
 require 'json'
 require 'rbconfig'
+require 'timeout'
 
 $username = 'ec2-user'
 os = RbConfig::CONFIG['host_os']
@@ -15,6 +16,57 @@ $os = if os.downcase.include?('linux')
         'windows'
       end
 $default_ec2_os = 'LINUX'
+
+class AwsLabs
+  attr_reader :profile, :region, :aws_access_key_id, :aws_secret_access_key, :lab_number, :ec2_client
+  attr_reader :profile, :region, :aws_access_key_id, :aws_secret_access_key, :lab_number, :ec2_client
+  # Initialize the AwsLabs Client
+  #
+  # @param [Hash] options parameters for intantiating the client
+  #  * +:profile+ [String] the name of the profile(required)
+  #  * +:region+ [String] the region you want to run in (required)
+  #
+  # @example Instantiate the AwsLabs Client
+  #   @client = SonarQube::Client.new(
+  #     :host => "12.345.67.89",
+  #     :port => 443,
+  #     :api_token => '12325346sdfs453413'
+  #   )
+  #
+  def initialize(options)
+    @lab_number = options[:lab_number]
+    @profile = create_profile_name(options)
+    @aws_access_key_id = options[:aws_access_key_id] || get_aws_access_key_id
+    @aws_secret_access_key = options[:aws_secret_access_key] || get_aws_secret_access_key
+    @region = options[:region] || 'us-east-1'
+    @os = options[:os] || 'LINUX'
+    @ec2_client = create_ec2_client
+  end
+
+  def create_profile_name(options)
+    lab_number = options[:lab_number]
+    year_month = Date.today.strftime('%Y-%m')
+    "aws-class-#{year_month}-lab#{lab_number}"
+  end
+
+  def aws_credentials
+    Aws::SharedCredentials.new(profile_name: @profile_name).credentials
+  end
+
+  def get_aws_access_key_id
+    aws_credentials.access_key_id
+  end
+
+  def get_aws_secret_access_key
+    aws_credentials.access_key_id
+  end
+
+  def create_ec2_client
+    Aws.config[:profile] = @profile
+    Aws.config[:region] = @region
+    Aws::EC2::Client.new
+  end
+end
 
 class Setup < Thor
   desc 'new_lab', 'Configure your ~/.aws/credentials file with new lab creds'
@@ -54,7 +106,7 @@ class Setup < Thor
     lab_number = options[:lab_number]
     latest_downloaded_key = Dir["#{ENV['HOME']}/Downloads/qwikLABS*.pem"].sort_by { |file_name| File.stat(file_name).mtime }.last
     latest_download_sha = Digest::SHA2.file(latest_downloaded_key).hexdigest
-    latest_local_lab_keys = Dir["#{ENV['HOME']}/.ssh/aws-lab*.pem"].sort_by { |file_name| File.stat(file_name) }
+    latest_local_lab_keys = Dir["#{ENV['HOME']}/.ssh/aws-lab#{lab_number}.pem"].sort_by { |file_name| File.stat(file_name) }
     latest_local_sha = nil
     unless latest_local_lab_keys.empty?
       latest_local_lab_key = latest_local_lab_keys.last
@@ -88,10 +140,23 @@ class Setup < Thor
     Aws.config[:profile] = profile_name
     ec2 = Aws::EC2::Client.new
     ec2_filters = nil
-    ec2_filters ||= [name: 'tag:Name', values: ["#{os.upcase} Dev Instance"]] if os
+    usefilter = "#{os.upcase} Dev Instance" if %w( LINUX WINDOWS ).include?(os)
+    usefilter ||= os
+    ec2_filters ||= [name: 'tag:Name', values: [usefilter]] if os
     focus_ec2 = ec2.describe_instances({filters: ec2_filters})
     public_ip = nil
     if focus_ec2.first[1].nil?
+      begin
+        Timeout.timeout(60) do
+          while focus_ec2.first.reservations.first.nil?
+            puts 'No public ip for the node yet'
+            sleep 2
+            focus_ec2 = ec2.describe_instances({filters: ec2_filters})
+          end
+        end
+      rescue Timeout::Error
+        puts 'Timeout waiting for EC2 instance to become active'
+      end
       public_ip = focus_ec2.first.reservations.first.instances.first.public_ip_address
     else
       puts focus_ec2
@@ -120,7 +185,7 @@ class Setup < Thor
     hostname = s.get_instances(options)
     json_obj['hostname'] = hostname
     remote_sync_text = JSON.pretty_generate(json_obj)
-    lab_dir = File.join(ENV['HOME'], 'aws-labs', "lab#{lab_number}")
+    lab_dir = File.join(Dir.pwd, "lab#{lab_number}")
     Dir.mkdir(lab_dir) unless File.directory?(lab_dir)
     File.open(File.join(lab_dir, '.remote-sync.json'), 'w') { |f| f.write(remote_sync_text) }
   end
@@ -171,9 +236,24 @@ class Interact < Thor
   method_option :lab_number, :aliases => '-l', :type => :numeric, :desc => 'Lab number'
   def atom(options = options)
     lab_number = options[:lab_number]
-    lab_dir = File.join(ENV['HOME'], 'aws-labs', "lab#{lab_number}")
+    lab_dir = File.join(Dir.pwd, "lab#{lab_number}")
     command = 'atom ' + lab_dir
     puts "You are on #{$os.upcase} so this probably won't work" if $os == 'windows'
     exec(command)
+  end
+  desc 'get_windows_password', 'Not ready yet'
+  method_option :lab_number, :aliases => '-l', :type => :numeric, :desc => 'Lab number'
+  def get_windows_password(options = options)
+    os = 'WINDOWS'
+    aws_labs = AwsLabs.new(options)
+    client = aws_labs.ec2_client
+    ec2_filters = [name: 'tag:Name', values: ["#{os.upcase} Dev Instance"]] if os
+    focus_ec2 = client.describe_instances({filters: ec2_filters})
+    instance_id = focus_ec2.first.reservations.first.instances.first.instance_id
+    password = client.get_password_data({
+      dry_run: false,
+      instance_id: instance_id
+    })
+    puts password.data.password_data
   end
 end
