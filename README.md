@@ -82,6 +82,10 @@ Full setup of all services
 ```bash
 $ thor setup:easy --aws-access-key-id=<AWS_ACCESS_KEY_ID> --aws-secret-access-key=<AWS_SECRET_ACCESS_KEY> --os=<LINUX or WINDOWS> --lab-number=<LABNUMBER>
 ```
+#### SSH to an instance from your lab
+```bash
+$ thor interact:ssh --os=<LINUX or WINDOWS or Instance Name> --lab-number=<LABNUMBER>
+```
 
 ### Full usage
 To see what commands are available, run `thor list`
@@ -89,15 +93,18 @@ To see what commands are available, run `thor list`
 $ thor list
 interact
 --------
-thor interact:atom  # Open project in Atom
-thor interact:ssh   # SSH Command for given OS
+thor interact:atom                               # Open project in Atom
+thor interact:download_cloudformation_templates  # Downloads all CloudFormation Templates from your VPC
+thor interact:get_ec2_instances                  # Not ready yet
+thor interact:get_windows_password               # Not ready yet
+thor interact:ssh                                # SSH Command for given OS
 
 setup
 -----
-thor setup:configure_lab_key                                # Configure key for the new lab
-thor setup:easy                                             # Full setup of all services
-thor setup:get_instances                                    # Get instances matching parameter
-thor setup:new_lab AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY  # Configure your ~/.aws/credentials file with new lab creds
-thor setup:remote_sync                                      # Configure remote-sync for Atom
+thor setup:configure_lab_key  # Configure key for the new lab
+thor setup:easy               # Full setup of all services
+thor setup:get_instances      # Get instances matching parameter
+thor setup:new_lab            # Configure your ~/.aws/credentials file with new lab creds
+thor setup:remote_sync        # Configure remote-sync for Atom
 
 ```

@@ -18,8 +18,8 @@ $os = if os.downcase.include?('linux')
 $default_ec2_os = 'LINUX'
 
 class AwsLabs
-  attr_reader :profile, :region, :aws_access_key_id, :aws_secret_access_key, :lab_number, :ec2_client
-  attr_reader :profile, :region, :aws_access_key_id, :aws_secret_access_key, :lab_number, :ec2_client
+  attr_reader :profile, :region, :aws_access_key_id, :aws_secret_access_key, :lab_number, :ec2_client, :cft_client, :lab_dir
+  attr_reader :profile, :region, :aws_access_key_id, :aws_secret_access_key, :lab_number, :ec2_client, :cft_client, :lab_dir
   # Initialize the AwsLabs Client
   #
   # @param [Hash] options parameters for intantiating the client
@@ -35,12 +35,14 @@ class AwsLabs
   #
   def initialize(options)
     @lab_number = options[:lab_number]
+    @lab_dir = File.join(File.dirname(__FILE__), "lab#{lab_number}")
     @profile = create_profile_name(options)
     @aws_access_key_id = options[:aws_access_key_id] || get_aws_access_key_id
     @aws_secret_access_key = options[:aws_secret_access_key] || get_aws_secret_access_key
     @region = options[:region] || 'us-east-1'
     @os = options[:os] || 'LINUX'
     @ec2_client = create_ec2_client
+    @cft_client = create_cft_client
   end
 
   def create_profile_name(options)
@@ -58,13 +60,19 @@ class AwsLabs
   end
 
   def get_aws_secret_access_key
-    aws_credentials.access_key_id
+    aws_credentials.secret_access_key
   end
 
   def create_ec2_client
     Aws.config[:profile] = @profile
     Aws.config[:region] = @region
     Aws::EC2::Client.new
+  end
+
+  def create_cft_client
+    Aws.config[:profile] = @profile
+    Aws.config[:region] = @region
+    Aws::CloudFormation::Client.new
   end
 end
 
@@ -170,6 +178,8 @@ class Setup < Thor
   def remote_sync(options = options)
     lab_number = options[:lab_number]
     options[:os] ||= $default_ec2_os
+    lab_dir = File.join(Dir.pwd, "lab#{lab_number}")
+    Dir.mkdir(lab_dir) unless File.directory?(lab_dir)
     json_obj = JSON.parse("{\n  \"uploadOnSave\": true,\n  \"useAtomicWrites\": " \
     "false,\n  \"deleteLocal\": false,\n  \"hostname\": \"\",\n"" \
     \"port\": \"22\",\n  \"target\": \"\",\n" \
@@ -185,8 +195,6 @@ class Setup < Thor
     hostname = s.get_instances(options)
     json_obj['hostname'] = hostname
     remote_sync_text = JSON.pretty_generate(json_obj)
-    lab_dir = File.join(Dir.pwd, "lab#{lab_number}")
-    Dir.mkdir(lab_dir) unless File.directory?(lab_dir)
     File.open(File.join(lab_dir, '.remote-sync.json'), 'w') { |f| f.write(remote_sync_text) }
   end
   desc 'easy', 'Full setup of all services'
@@ -255,5 +263,31 @@ class Interact < Thor
       instance_id: instance_id
     })
     puts password.data.password_data
+  end
+  desc 'get_ec2_instances', 'Not ready yet'
+  method_option :lab_number, :aliases => '-l', :type => :numeric, :desc => 'Lab number'
+  def get_ec2_instances(options = options)
+    # os = 'WINDOWS'
+    aws_labs = AwsLabs.new(options)
+    client = aws_labs.ec2_client
+    ec2_filters = [name: 'tag:Name', values: ["#{os.upcase} Dev Instance"]] if os
+    focus_ec2 = client.describe_instances({filters: ec2_filters})
+    instance_id = focus_ec2.first.reservations.first.instances.first.instance_id
+  end
+  desc 'download_cloudformation_templates', 'Downloads all CloudFormation Templates from your VPC'
+  method_option :lab_number, :aliases => '-l', :type => :numeric, :desc => 'Lab number'
+  def download_cloudformation_templates(options = options)
+    aws_labs = AwsLabs.new(options)
+    cft_dir = File.join(aws_labs.lab_dir, 'cloudformation_templates')
+    Dir.mkdir(cft_dir) unless File.directory?(cft_dir)
+    puts 'Downloading CloudFormation Templates to: ' + cft_dir
+    client = aws_labs.cft_client
+    cfts = aws_labs.cft_client.describe_stacks.stacks.map { |stack| stack.stack_name }
+    cfts.each do |cft|
+      puts 'Saving: ' + cft + ' ...'
+      cft_content = aws_labs.cft_client.get_template(stack_name: cft).template_body
+      File.open(File.join(cft_dir, "#{cft}.json"), 'w') { |file| file.write(cft_content) }
+    end
+    puts 'Done.'
   end
 end
